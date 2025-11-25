@@ -164,7 +164,6 @@ class AcyclicSP
             }
         }
 
-        // Método público para verificar se ciclo foi detectado
         bool hasCycle() const { return cycleFound; }
         bool isValid() const { return !cycleFound; }
         double distanceTo(int v) const { return distTo[v]; }
@@ -186,7 +185,7 @@ class belmanFordSP
     private:
         vector<double> distTo;
         vector<Edge> edgeTo;
-        bool hasNegCycle; // 1. Nova variável para armazenar o estado
+        bool hasNegCycle; // 1. Variável para armazenar o estado
 
     public:
         belmanFordSP(const EWDigraph &G, int s) : hasNegCycle(false) // Inicializa como false
@@ -195,7 +194,7 @@ class belmanFordSP
             edgeTo.resize(G.getV(), Edge(-1, -1, 0.0));
             distTo[s] = 0.0;    
 
-            // Passo 1: Relaxamento das arestas |V|-1 vezes (Seu código original)
+            // Passo 1: Relaxamento das arestas |V|-1 vezes (código original)
             for (int i = 0; i < G.getV() - 1; i++)
             {
                 for (int v = 0; v < G.getV(); v++)
@@ -216,10 +215,10 @@ class belmanFordSP
                     int w = e.to();
                     // Se ainda conseguirmos melhorar a distância, existe um ciclo negativo
                     if (distTo[v] != numeric_limits<double>::infinity() && 
-                        distTo[w] > distTo[v] + e.weight)
+                        distTo[w] > distTo[v] + e.weight + 1e-9)
                     {
                         hasNegCycle = true;
-                        return; // Encontramos, podemos parar o construtor
+                        return;
                     }
                 }
             }
