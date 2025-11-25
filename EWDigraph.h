@@ -6,23 +6,29 @@
 #include <fstream>
 #include <sstream>
 #include <iomanip>
-#include <algorithm> 
+#include <algorithm>
+#include <limits>
+#include <cmath>
 
 using namespace std;
 
-// Fila de Prioridade Minima Indexada
+// --- Fila de Prioridade Mínima Indexada (Necessária para Dijkstra) ---
 template <typename Key>
 class IndexMinPQ {
 private:
     int maxN;
     int n;
-    vector<int> pq;     // heap binario usando indexaçao baseada em 1
-    vector<int> qp;     // inverso de pq: qp[pq[i]] = pq[qp[i]] = i
-    vector<Key> keys;   // chaves[i] = prioridade de i
+    vector<int> pq;     // heap binário base 1
+    vector<int> qp;     // inverso de pq
+    vector<Key> keys;   // prioridades
 
     void exch(int i, int j) { swap(pq[i], pq[j]); qp[pq[i]] = i; qp[pq[j]] = j; }
     bool greater(int i, int j) const { return keys[pq[i]] > keys[pq[j]]; }
-    void swim(int k) { while (k > 1 && greater(k/2, k)) { exch(k, k/2); k = k/2; } }
+    
+    void swim(int k) { 
+        while (k > 1 && greater(k/2, k)) { exch(k, k/2); k = k/2; } 
+    }
+    
     void sink(int k) {
         while (2*k <= n) {
             int j = 2*k;
@@ -32,9 +38,10 @@ private:
             k = j;
         }
     }
+    
     void validateIndex(int i) const {
-        if (i < 0) throw out_of_range("indice e negativo");
-        if (i >= maxN) throw out_of_range("indice >= capacidade maxima");
+        if (i < 0) throw out_of_range("Indice negativo");
+        if (i >= maxN) throw out_of_range("Indice maior que a capacidade");
     }
 
 public:
@@ -45,7 +52,7 @@ public:
 
     void insert(int i, Key key) {
         validateIndex(i);
-        if (contains(i)) throw logic_error("indice ja esta na fila de prioridade");
+        if (contains(i)) throw logic_error("Indice ja existe na fila");
         n++;
         qp[i] = n;
         pq[n] = i;
@@ -64,32 +71,49 @@ public:
 
     void decreaseKey(int i, Key key) {
         validateIndex(i);
-        if (!contains(i)) throw out_of_range("indice nao esta na fila de prioridade");
-        if (keys[i] < key)
-            throw invalid_argument("decreaseKey() com chave maior que a atual");
+        if (!contains(i)) throw out_of_range("Indice nao existe na fila");
+        if (keys[i] < key) throw invalid_argument("Chave nova eh maior que a atual");
         keys[i] = key;
         swim(qp[i]);
     }
 };
 
-/**
- * @struct Edge
- * @brief Representa uma aresta direcionada e ponderada (v -> w).
- */
+// --- Estrutura da Aresta (Atualizada para Fluxo) ---
 struct Edge {
     int v, w;
-    double weight;
+    double weight; // Capacidade/Custo
+    double flow;   // Fluxo atual (Novo!)
 
-    Edge(int v = -1, int w = -1, double weight = 0.0) : v(v), w(w), weight(weight) {}
+    Edge(int v = -1, int w = -1, double weight = 0.0) 
+        : v(v), w(w), weight(weight), flow(0.0) {}
 
     int from() const { return v; }
     int to() const { return w; }
+
+    // Retorna o vértice oposto (essencial para grafos residuais)
+    int other(int vertex) const {
+        if (vertex == v) return w;
+        if (vertex == w) return v;
+        throw invalid_argument("Vertice invalido na aresta");
+    }
+
+    // Métodos auxiliares para Ford-Fulkerson
+    double capacity() const { return weight; }
+    
+    double residualCapacityTo(int vertex) const {
+        if (vertex == w) return weight - flow; // Forward: capacidade restante
+        else if (vertex == v) return flow;     // Backward: fluxo que pode retornar
+        else throw invalid_argument("Vertice invalido na aresta");
+    }
+
+    void addResidualFlowTo(int vertex, double delta) {
+        if (vertex == w) flow += delta;       // Aumenta fluxo
+        else if (vertex == v) flow -= delta;  // Diminui fluxo
+        else throw invalid_argument("Vertice invalido na aresta");
+    }
 };
 
-/**
- * @class EWDigraph
- * @brief Representa um digrafo ponderado usando lista de adjacência.
- */
+// --- Classe do Dígrafo Ponderado ---
 class EWDigraph {
 private:
     int V;
@@ -97,22 +121,18 @@ private:
     vector<list<Edge>> adj;
 
 public:
-    // Construtor a partir do numero de vertices
     EWDigraph(int V) : V(V), E(0) {
         if (V < 0) throw invalid_argument("Numero de vertices nao pode ser negativo");
         adj.resize(V);
     }
 
-    // Construtor a partir de um arquivo de entrada
     EWDigraph(istream &in) {
-        if (!in) throw invalid_argument("Stream de entrada nulo.");
+        if (!in) throw invalid_argument("Stream de entrada invalido");
         in >> V;
         adj.resize(V);
         E = 0;
-
         int totalEdges;
         in >> totalEdges;
-
         for (int i = 0; i < totalEdges; i++) {
             int v, w;
             double weight;
@@ -121,7 +141,6 @@ public:
         }
     }
 
-    // Adiciona uma aresta direcionada v -> w
     void addEdge(Edge e) {
         E++;
         adj[e.from()].push_back(e);
@@ -130,8 +149,7 @@ public:
     int getV() const { return V; }
     int getE() const { return E; }
 
-
-     // Retorna todas as arestas do grafo 
+    // Retorna todas as arestas (útil para clonar)
     vector<Edge> getAllEdges() const {
         vector<Edge> edges;
         for (int v = 0; v < V; ++v) {
@@ -141,64 +159,45 @@ public:
         }
         return edges;
     }
-     
 
-     list<Edge> getAdj(int v) const
-    {
-        return adj[v];
+    // Retorna referência para permitir modificação do fluxo
+    list<Edge>& getAdj(int v) { return adj[v]; }
+    const list<Edge>& getAdj(int v) const { return adj[v]; }
+
+    // Verifica se há arestas negativas (para proteção do Dijkstra)
+    bool hasNegativeEdge() const {
+        for (int v = 0; v < V; ++v) {
+            for (const auto& e : adj[v]) {
+                if (e.weight < 0) return true;
+            }
+        }
+        return false;
     }
 
-    //Mostra o Grafo
-    void show(){
-       vector<Edge> edges;
-       cout << "Grafo com " << V << " vertices e " << E << " arestas." << endl;
-       cout << "---------------------------------------------" << endl;
-       for (int v = 0; v < V; ++v) {
-           for (const auto& edge : adj[v]) {
-                cout << "  " << v << " -> " << edge.w << ": "<< edge.weight << "\n";
-           }
-       }
+    void show() {
+        cout << "Grafo com " << V << " vertices e " << E << " arestas." << endl;
+        cout << "---------------------------------------------" << endl;
+        for (int v = 0; v < V; ++v) {
+            for (const auto& edge : adj[v]) {
+                if (abs(edge.weight) > 1e-9 || edge.flow > 0)
+                    cout << "  " << v << " -> " << edge.w << ": " << edge.weight << "\n";
+            }
+        }
         cout << "---------------------------------------------" << endl;
     }
-
-    //Mostra o grafo no formato dot
-    void showDot(){
+    
+    void showDot() {
         cout << "digraph {\n";
         cout << "  node [shape=circle];\n";
         cout << "  edge [labeldistance=1.5];\n";
         for (int v = 0; v < V; ++v) {
             for (const auto& edge : adj[v]) {
-                cout << "  " << v << " -> " << edge.w
-                        << " [label=\"" << fixed << setprecision(2) << edge.weight << "\"];\n";
+                if (abs(edge.weight) > 1e-9) {
+                    cout << "  " << v << " -> " << edge.w
+                         << " [label=\"" << fixed << setprecision(2) << edge.weight << "\"];\n";
+                }
             }
         }
-            cout << "}\n";
+        cout << "}\n";
     }
-
-    // Iterador para percorrer as arestas adjacentes a um vertice
-    class adjIterator {
-    private:
-        const EWDigraph &G;
-        typename list<Edge>::const_iterator it;
-    public:
-        adjIterator(const EWDigraph &G, int v) : G(G) {
-            it = G.adj[v].begin();
-        }
-
-        Edge beg(int v) {
-            it = G.adj[v].begin();
-            return (it != G.adj[v].end()) ? *it : Edge(-1, -1);
-        }
-
-        Edge nxt(int v) {
-            if (it != G.adj[v].end()) ++it;
-            return (it != G.adj[v].end()) ? *it : Edge(-1, -1);
-        }
-
-        bool end(int v) const {
-            return it == G.adj[v].end();
-        }
-    };
 };
-
-
